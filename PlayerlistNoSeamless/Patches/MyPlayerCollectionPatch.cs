@@ -1,4 +1,6 @@
 ﻿using System;
+using System.Collections.Concurrent;
+using System.Collections.Generic;
 using System.Linq;
 using System.Reflection;
 using NLog;
@@ -7,6 +9,7 @@ using Sandbox.Game.Multiplayer;
 using Sandbox.Game.World;
 using Torch;
 using Torch.Managers.PatchManager;
+using Nexus.API;
 
 namespace PlayerlistNoSeamless.Patches
 {
@@ -14,59 +17,44 @@ namespace PlayerlistNoSeamless.Patches
     public static class MyPlayerCollectionPatch
     {
         private static Logger _log = LogManager.GetCurrentClassLogger();
+        private static List<NexusAPI.Player> onlinePlayers = new List<NexusAPI.Player>();
+        private static List<NexusAPI.Server> onlineServers = new List<NexusAPI.Server>();
+        
         public static void Patch(PatchContext ctx)
         {
-
-            if (!TorchBase.Instance.Plugins.Plugins.ContainsKey(Guid.Parse("28a12184-0422-43ba-a6e6-2e228611cca5")))
-            {
-                _log.Info("Nexus not installed, skipping patching MyPlayerCollection.");
-                return;
-            }
-
-            var loadedAssemblies = AppDomain.CurrentDomain.GetAssemblies();
-            var nexusAssembly = loadedAssemblies.FirstOrDefault(a => a.GetName().Name == "Nexus");
-            
-            if (nexusAssembly == null)
-            {
-                throw new Exception("Nexus assembly not found.");
-            }
-            
-            var nexusAPIType = nexusAssembly.GetType("Nexus.API.NexusAPI");
-            var GetAllOnlinePlayersMethod = nexusAPIType.GetMethod("GetAllOnlinePlayers", BindingFlags.Public | BindingFlags.Static);
-            var GetAllServersMethod = nexusAPIType.GetMethod("GetAllServers", BindingFlags.Public | BindingFlags.Static);
-            
-            if (GetAllOnlinePlayersMethod == null)
-            {
-                _log.Error("Nexus API not found, skipping patching MyPlayerCollection.");
-                return;
-            }
-            
-            if (GetAllServersMethod == null)
-            {
-                _log.Error("Nexus API not found, skipping patching MyPlayerCollection.");
-                return;
-            }
-            
-            
-            var OnlinePlayers = GetAllOnlinePlayersMethod.Invoke(null, null);
-            var ConnectedServers = GetAllServersMethod.Invoke(null, null);
-            
-            _log.Info($"OnlinePlayers: {OnlinePlayers}");
-            
-            
             //Filter out players currently connected to the server we are running on
             //with the other players, Grab their info and store in a list to use in our prefix method
             
             MethodInfo target = typeof(MyPlayerCollection).GetMethod("AddPlayer", BindingFlags.Instance | BindingFlags.NonPublic);
-            ctx.GetPattern(target).Prefixes.Add(typeof(MyPlayerCollectionPatch).GetMethod(nameof(AddPlayerPrefix), BindingFlags.Static | BindingFlags.Public));
+            ctx.GetPattern(target).Prefixes.Add(typeof(MyPlayerCollectionPatch).GetMethod(nameof(GetOnlinePlayersPrefix), BindingFlags.Static | BindingFlags.Public));
             
             
             _log.Info("Patched MyPlayerCollection");
         }
         
-        public static bool AddPlayerPrefix(MyPlayerCollection __instance, MyPlayer.PlayerId playerId, MyPlayer newPlayer)
+        public static bool GetOnlinePlayersPrefix(MyPlayerCollection __instance, IEnumerable<MyPlayer> __result)
+        {
+            var m_players = typeof(MyPlayerCollection).GetField("m_players", BindingFlags.Instance | BindingFlags.NonPublic).GetValue(__instance);
+
+            var m_playersValues = m_players.GetType().GetMethod("Values")?.Invoke(m_players, null);
+            
+            __result = (IEnumerable<MyPlayer>) m_playersValues;
+            return false;
+        }
+        
+        /*public static bool AddPlayerPrefix(MyPlayerCollection __instance, MyPlayer.PlayerId playerId, MyPlayer newPlayer)
         {
             _log.Error($"Player joined. {newPlayer.DisplayName} {newPlayer.Id.SteamId} {newPlayer.Id.SerialId} {newPlayer.Id.ToString()} {newPlayer.Id.ToString()}");
+            
+            onlinePlayers = NexusAPI.GetAllOnlinePlayers();
+            onlineServers = NexusAPI.GetAllServers();
+
+            var currentServer = NexusAPI.GetThisServer();
+            
+            //Filter out players currently connected to the server we are running on
+            onlinePlayers = onlinePlayers.Where(x => x.OnServer != currentServer.ServerID).ToList();
+            
+            
             var m_players = typeof(MyPlayerCollection).GetField("m_players", BindingFlags.Instance | BindingFlags.NonPublic).GetValue(__instance);
             
              if (Sync.IsServer && MyVisualScriptLogicProvider.PlayerConnected != null)
@@ -74,11 +62,7 @@ namespace PlayerlistNoSeamless.Patches
             newPlayer.Identity.LastLoginTime = DateTime.Now;
             newPlayer.Identity.BlockLimits.SetAllDirty();
             
-            
-            /*if (!m_players.TryAdd(playerId, newPlayer))
-            {
-                VRage.MyDebug.Assert(false, "Player already in collection.");
-            }*/
+        
             
             
             //Loop through our created list and add player info
@@ -119,6 +103,6 @@ namespace PlayerlistNoSeamless.Patches
                 }
             }
             return false;
-        }
+        }*/
     }
 }
